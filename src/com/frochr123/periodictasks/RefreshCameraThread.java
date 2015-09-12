@@ -16,7 +16,7 @@
  *     You should have received a copy of the GNU Lesser General Public License
  *     along with VisiCut.  If not, see <http://www.gnu.org/licenses/>.
  **/
-package com.frochr123.periodicthreads;
+package com.frochr123.periodictasks;
 
 import com.t_oster.visicut.gui.MainView;
 import com.t_oster.visicut.VisicutModel;
@@ -29,8 +29,8 @@ public class RefreshCameraThread extends Thread
 {
   // Constant values
   public static final int DEFAULT_CAMERA_TIME = 50;
-  public static final int DEFAULT_CAMERA_LONG_WAIT_TIME = 15000;
-  
+  public static final int DEFAULT_CAMERA_ERROR_WAIT_TIME = 10000;
+
   // Constructor
   public RefreshCameraThread()
   {
@@ -38,7 +38,7 @@ public class RefreshCameraThread extends Thread
   }
 
   // Compute update timer, ensure valid data
-  public int getUpdateTimerMs()
+  public static int getUpdateTimerMs()
   {
     if (VisicutModel.getInstance().getSelectedLaserDevice() != null)
     {
@@ -52,29 +52,46 @@ public class RefreshCameraThread extends Thread
   }
 
   // Check MainView if camera and background are set to active
-  protected boolean isActive()
+  public static boolean isActive()
   {
     return MainView.getInstance().isCameraActive() && MainView.getInstance().isPreviewPanelShowBackgroundImage();
   }
- 
+
   // Run method
   @Override
   public void run()
   {
+    int errorCounter = 0; // how many errors since last successful capture?
     while (true)
     {
       try
       {
-        // Check if last run caused exception
-        if (!MainView.getInstance().getCameraCapturingError().isEmpty())
+        // Check if last image capture has finished
+        String error = MainView.getInstance().getCameraCapturingError();
+        if (error != null)
         {
-          // Sleep extra long time, avoid spamming of warnings
-          MainView.getInstance().getDialog().showWarningMessage(MainView.getInstance().getCameraCapturingError());
           MainView.getInstance().resetCameraCapturingError();
-          Thread.currentThread().sleep(DEFAULT_CAMERA_LONG_WAIT_TIME);
-          continue;
+          if (error.isEmpty()) {
+            // successfully captured
+            errorCounter = 0;
+            MainView.getInstance().getDialog().removeMessageWithId("camera error");
+          } else {
+            // error has occured
+            errorCounter++;
+            MainView.getInstance().getDialog().showWarningMessageOnce(error, "camera error", 0);
+            // no timeout for this message, to prevent flickering when fetching an image takes very long.
+            // The message will be cleared anyway,
+            // either when disabling the camera via MainView.cameraActiveMenuItemActionPerformed
+            // or after a successful capture (removeMessageWithId few lines above this comment)
+            
+            // sleep some extra time, so that VisiCam isn't overloaded            
+            // increase waiting time after each error
+            // quick retry after the first error, it could have been a network glitch
+            Thread.sleep(Math.max(errorCounter, 2) * DEFAULT_CAMERA_ERROR_WAIT_TIME / 2 + getUpdateTimerMs());
+            continue;
+          }
         }
-
+        
         // Check if thread should be working
         if (!isActive())
         {
@@ -82,7 +99,7 @@ public class RefreshCameraThread extends Thread
           Thread.currentThread().sleep(getUpdateTimerMs() * 5);
           continue;
         }
-        
+
         // Call capture new image if everyhing is fine
         if (!MainView.getInstance().getVisiCam().isEmpty())
         {
